@@ -11,20 +11,24 @@ local function autocommands()
     pattern = "*",
     callback = function()
       log.trace("InsertLeave event triggered")
-      for _, extmark in ipairs(extmarks) do
-        vim.api.nvim_buf_del_extmark(0, ns_id, extmark)
-      end
-      extmarks = {}
-
-      if popup_win and vim.api.nvim_win_is_valid(popup_win) then
-        vim.api.nvim_win_close(popup_win, true)
-        popup_win = nil
-      end
+      M.clear_ui()
     end,
     desc = "Llemper: Clear diff extmarks on InsertLeave",
   })
 end
 autocommands()
+
+function M.clear_ui()
+  for _, extmark in ipairs(extmarks) do
+    vim.api.nvim_buf_del_extmark(0, ns_id, extmark)
+  end
+  extmarks = {}
+
+  if popup_win and vim.api.nvim_win_is_valid(popup_win) then
+    vim.api.nvim_win_close(popup_win, true)
+    popup_win = nil
+  end
+end
 
 ---@class DiffDisplayOpts
 ---@field inline? boolean
@@ -53,7 +57,7 @@ function M.diff_cleanupLines(diffs)
     log.trace("Split text into lines", { lines = lines })
 
     for i, line in ipairs(lines) do
-      if  i < #lines then
+      if i < #lines then
         table.insert(processed_line, { op, line })
         table.insert(processed, processed_line)
         processed_line = {}
@@ -92,13 +96,13 @@ function M.show_diff(original, suggestion, diff_lines, opts)
         local op, text = diff[1], diff[2]
         log.trace("Processing inline diff", { op = op, text = text })
 
-        if op == 1 and yi == 1 then
-          -- local extmark = vim.api.nvim_buf_set_extmark(0, ns_id, start_line, start_col, {
-          --   virt_text = { { text, "NonText" } },
-          --   virt_text_pos = "inline",
-          --   strict = false,
-          -- })
-          -- table.insert(extmarks, extmark)
+        if op == 1 and yi == 1 and not opts.overlay then
+          local extmark = vim.api.nvim_buf_set_extmark(0, ns_id, start_line, start_col, {
+            virt_text = { { text, "NonText" } },
+            virt_text_pos = "inline",
+            strict = false,
+          })
+          table.insert(extmarks, extmark)
         elseif op == -1 then
           local extmark = vim.api.nvim_buf_set_extmark(0, ns_id, start_line + y_offset, start_col, {
             end_col = start_col + #text,
@@ -167,8 +171,8 @@ function M.show_diff(original, suggestion, diff_lines, opts)
       width = win_width,
       height = #suggestion_lines,
       col = vim.fn.strdisplaywidth(original) + 2,
-      bufpos = { vim.fn.line("."), 0 },
-      anchor = "SW",
+      bufpos = { vim.fn.line(".") - #suggestion_lines, 0 },
+      anchor = "NW",
       style = "minimal",
       border = "none",
     })
