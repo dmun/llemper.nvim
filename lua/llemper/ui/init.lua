@@ -94,7 +94,7 @@ function M.show_diff(hunk, opts)
         local op, text = diff[1], diff[2]
         log.trace("Processing inline diff", { op = op, text = text })
 
-        if op == 1 and yi == 1 then
+        if op == 1 and yi == 1 and not opts.overlay then
           local extmark = vim.api.nvim_buf_set_extmark(0, ns_id, start_line, start_col, {
             virt_text = { { text, "NonText" } },
             virt_text_pos = "inline",
@@ -162,9 +162,9 @@ function M.show_diff(hunk, opts)
         end
       end
     end
-    
+
     local widest = 0
-    for _, line in ipairs(suggestion_lines) do
+    for _, line in ipairs(vim.split(hunk.text, "\n")) do
       local line_width = vim.fn.strdisplaywidth(line)
       if line_width > widest then
         widest = line_width

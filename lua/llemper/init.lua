@@ -52,8 +52,8 @@ function M.setup(opts)
         local hunk = {}
         hunk.startline = vim.fn.line(".") - 1
         hunk.endline = hunk.startline + 4
-        table.insert(hunks, hunk)
-        M.suggest(hunk)
+        hunks[1] = hunk
+        M.suggest(hunks[1])
       end
 
       local hunk = hunks[1]
@@ -62,7 +62,7 @@ function M.setup(opts)
     desc = "Llemper: Show inline diff on text change",
   })
 
-  vim.api.nvim_create_autocmd("TextChangedI", {
+  vim.api.nvim_create_autocmd({ "TextChangedI" }, {
     pattern = "*",
     callback = function()
       if M.skip then
@@ -83,8 +83,8 @@ function M.suggest(hunk)
   hunk.text = table.concat(lines, "\n")
 
   local diff = dmp.diff_main(hunk.text, _suggestion)
-  dmp.diff_cleanupSemantic(diff)
-  -- dmp.diff_cleanupEfficiency(diff)
+  -- dmp.diff_cleanupSemantic(diff)
+  dmp.diff_cleanupEfficiency(diff)
   diff = ui.diff_cleanupLines(diff)
 
   local suggestion = {
