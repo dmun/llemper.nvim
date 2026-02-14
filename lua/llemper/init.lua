@@ -4,8 +4,26 @@ local ui = require("llemper.ui")
 
 local M = {}
 
-M.suggestion = nil
-M.line = nil
+---@class Hunk
+---@field text string
+---@field suggestions Suggestion[]
+---@field startline integer
+---@field endline integer
+
+---@class Suggestion
+---@field text string
+---@field diff Diff[][]
+
+local _suggestion = [[
+def flagAllNeighbors(board, row, col): 
+  for r, c in board.getNeighbors(row, col):
+    if board.isValid(r, c):
+      board.flag(r, c)
+]]
+
+---@type Hunk[]
+local hunks = {}
+
 M.skip = false
 
 function M.setup(opts)
@@ -30,7 +48,16 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd("InsertEnter", {
     pattern = "*",
     callback = function()
-      M.suggest()
+      if vim.tbl_isempty(hunks) then
+        local hunk = {}
+        hunk.startline = vim.fn.line(".") - 1
+        hunk.endline = hunk.startline + 4
+        table.insert(hunks, hunk)
+        M.suggest(hunk)
+      end
+
+      local hunk = hunks[1]
+      ui.show_diff(hunk, { inline = true, overlay = true })
     end,
     desc = "Llemper: Show inline diff on text change",
   })
@@ -43,33 +70,39 @@ function M.setup(opts)
         return
       end
       ui.clear_ui()
-      M.suggest()
+      M.suggest(hunks[1])
+      ui.show_diff(hunks[1], { inline = true, overlay = true })
     end,
     desc = "",
   })
 end
 
-function M.suggest()
-  local text = vim.api.nvim_get_current_line()
-  M.line = vim.fn.line(".") - 1
-  -- local diff = dmp.diff_main(text, text:sub(1, 4) .. "yep" .. text:sub(8) .. ".setup()")
-  -- local suggestion = text:sub(1, 4) .. "yep" .. text:sub(8) .. ".setup()\nrequire('bruh')"
-  local suggestion = "veryCoolFunction" .. ".setup()\nrequire('bruh')"
-  M.suggestion = suggestion
-  local diff = dmp.diff_main(text, suggestion)
-  dmp.diff_cleanupSemantic(diff)
-  diff = ui.diff_cleanupLines(diff)
-  local overlay = vim.iter(diff):flatten(2):any(function(x)
-    return x == -1
-  end)
+---@param hunk Hunk
+function M.suggest(hunk)
+  local lines = vim.api.nvim_buf_get_lines(0, hunk.startline, hunk.endline, false)
+  hunk.text = table.concat(lines, "\n")
 
-  ui.show_diff(text, suggestion, diff, { inline = true, overlay = overlay })
+  local diff = dmp.diff_main(hunk.text, _suggestion)
+  dmp.diff_cleanupSemantic(diff)
+  -- dmp.diff_cleanupEfficiency(diff)
+  diff = ui.diff_cleanupLines(diff)
+
+  local suggestion = {
+    text = _suggestion,
+    diff = diff,
+  }
+
+  hunk.suggestions = {}
+  hunk.suggestions[1] = suggestion
 end
 
+---@pparam hunk Hunk
 function M.complete()
+  local hunk = hunks[1]
   M.skip = true
-  vim.api.nvim_buf_set_lines(0, M.line, M.line + 1, true, vim.split(M.suggestion, "\n"))
+  vim.api.nvim_buf_set_lines(0, hunk.startline, hunk.endline, false, vim.split(hunk.suggestions[1].text, "\n"))
   ui.clear_ui()
+  hunks = {}
 end
 
 return M
