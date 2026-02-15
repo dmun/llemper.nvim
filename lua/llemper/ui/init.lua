@@ -1,4 +1,5 @@
 local log = require("llemper.logger")
+local dmp = require("llemper.dmp")
 
 local M = {}
 
@@ -80,6 +81,13 @@ end
 ---@param opts DiffDisplayOpts
 function M.show_diff(hunk, opts)
   opts = opts or {}
+
+  local diff = dmp.diff_main(hunk.text, hunk.suggestions[1].text)
+  -- dmp.diff_cleanupSemantic(diff)
+  dmp.diff_cleanupEfficiency(diff)
+  diff = M.diff_cleanupLines(diff)
+
+  hunk.suggestions[1].diff = diff
 
   log.trace("diff", { original = hunk.text, diff = hunk.suggestions[1].diff, opts = opts })
 

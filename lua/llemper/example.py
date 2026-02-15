@@ -2,7 +2,6 @@
 function: flagAllNeighbors
 ----------
 This function marks each of the covered neighbors of the cell at the given row
-<|code_to_edit|>
 and col as flagged.
 '''''''''
 def flagAllNeighbors(board, row, col): 
@@ -10,3 +9,4 @@ def flagAllNeighbors(board, row, col):
   if b.isValid(r, c):
   b.flag(r, c)
   
+
