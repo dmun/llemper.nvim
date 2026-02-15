@@ -6,6 +6,7 @@ local provider = require("llemper.provider")
 local M = {}
 
 ---@class Hunk
+---@field file string
 ---@field text string
 ---@field suggestions Suggestion[]
 ---@field context Context
@@ -20,18 +21,24 @@ local M = {}
 ---@field before string
 ---@field after string
 
-local _suggestion = [[
-def flagAllNeighbors(board, row, col): 
-  for r, c in board.getNeighbors(row, col):
-    if board.isValid(r, c):
-      board.flag(r, c)
-]]
-
 ---@type Hunk[]
 local hunks = {}
 
 M.skip = false
 M.ignore_count = 0
+
+local last_buf_state = nil
+
+function M.update_edit_history()
+  -- local cur_buf_state = table.concat(vim.api.nvim_buf_get_lines(0, hunks[1].startline, hunks[1].endline, false), "\n")
+  local cur_buf_state = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
+  if last_buf_state then
+    local diff = vim.text.diff(last_buf_state, cur_buf_state)
+    log.debug(diff)
+    provider._edit_history:push(diff)
+  end
+  last_buf_state = cur_buf_state
+end
 
 function M.setup(opts)
   opts = opts or {}
@@ -62,7 +69,7 @@ function M.setup(opts)
         hunk.file = vim.fn.expand("%:t")
         hunk.context = {
           before = table.concat(vim.api.nvim_buf_get_lines(0, 0, hunk.startline, false), "\n"),
-          after = table.concat(vim.api.nvim_buf_get_lines(0, hunk.endline, -1, false), "\n"),
+          after = table.concat(vim.api.nvim_buf_get_lines(0, hunk.endline - 1, -1, false), "\n"),
         }
 
         hunks[1] = hunk
@@ -83,22 +90,43 @@ function M.setup(opts)
     callback = function()
       M.ignore_count = M.ignore_count + 1
 
-      if M.skip or vim.tbl_isempty(hunks[1].suggestions) then
+      if M.skip then
         M.skip = false
+        return
+      end
+
+      if vim.tbl_isempty(hunks) then
+        return
+      end
+
+      if not hunks[1].suggestions then
         return
       end
 
       ui.clear_ui()
       M.update_hunk(hunks[1])
 
-      if M.ignore_count > 3 then
+      if M.ignore_count > 2 then
         M.ignore_count = 0
+
+        M.update_edit_history()
+
         M.suggest(hunks[1])
       else
         ui.show_diff(hunks[1], { inline = true, overlay = true })
       end
     end,
     desc = "",
+  })
+
+  vim.api.nvim_create_autocmd("InsertLeave", {
+    pattern = "*",
+    callback = function()
+      M.update_edit_history()
+      hunks = {}
+      ui.clear_ui()
+    end,
+    desc = "Llemper: Clear diff extmarks on InsertLeave",
   })
 end
 
@@ -129,6 +157,10 @@ end
 ---@pparam hunk Hunk
 function M.complete()
   local hunk = hunks[1]
+
+  local diff = vim.text.diff(hunk.text, hunk.suggestions[1].text)
+  provider._edit_history:push(diff)
+
   M.skip = true
   vim.api.nvim_buf_set_lines(0, hunk.startline, hunk.endline, false, vim.split(hunk.suggestions[1].text, "\n"))
   ui.clear_ui()

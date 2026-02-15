@@ -7,18 +7,6 @@ local ns_id = vim.api.nvim_create_namespace("llemper_diff")
 local extmarks = {}
 local popup_win
 
-local function autocommands()
-  vim.api.nvim_create_autocmd("InsertLeave", {
-    pattern = "*",
-    callback = function()
-      log.trace("InsertLeave event triggered")
-      M.clear_ui()
-    end,
-    desc = "Llemper: Clear diff extmarks on InsertLeave",
-  })
-end
-autocommands()
-
 function M.clear_ui()
   for _, extmark in ipairs(extmarks) do
     vim.api.nvim_buf_del_extmark(0, ns_id, extmark)
@@ -82,12 +70,20 @@ end
 function M.show_diff(hunk, opts)
   opts = opts or {}
 
+  if hunk.suggestions == nil or vim.tbl_isempty(hunk.suggestions) then
+    return
+  end
+
   local diff = dmp.diff_main(hunk.text, hunk.suggestions[1].text)
-  -- dmp.diff_cleanupSemantic(diff)
-  dmp.diff_cleanupEfficiency(diff)
+  dmp.diff_cleanupSemantic(diff)
+  -- dmp.diff_cleanupEfficiency(diff)
   diff = M.diff_cleanupLines(diff)
 
   hunk.suggestions[1].diff = diff
+
+  opts.overlay = vim.iter(diff):flatten():any(function(x)
+    return x[1] == 1 or x[1] == -1
+  end)
 
   log.trace("diff", { original = hunk.text, diff = hunk.suggestions[1].diff, opts = opts })
 
@@ -123,7 +119,7 @@ function M.show_diff(hunk, opts)
       end
     end
 
-    -- local lines = vim.split(suggestion, "\n")
+    -- local lines = vim.split(hunk.suggestions[1].text, "\n")
     -- local extmark = vim.api.nvim_buf_set_extmark(0, ns_id, start_line, 0, {
     --   virt_lines = vim
     --     .iter(lines)

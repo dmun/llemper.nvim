@@ -1,4 +1,5 @@
 local log = require("llemper.logger")
+local ringbuf = require("llemper.ringbuf")
 
 local inception = [[
 <|recently_viewed_code_snippets|>
@@ -27,6 +28,8 @@ current_file_path: %s
 
 local M = {}
 
+M._edit_history = ringbuf.new(5)
+
 ---@type table<string, Preset>
 M.presets = {}
 
@@ -39,23 +42,38 @@ M.presets.mercury = {
   prepare_request = function(hunk)
     local cursor_col = vim.api.nvim_win_get_cursor(0)[2]
     local text_with_cur = string.sub(hunk.text, 1, cursor_col - 1) .. "<|cursor|>" .. string.sub(hunk.text, cursor_col)
+
+    local edit_history = {}
+    for diff in M._edit_history:iter() do
+      table.insert(edit_history, diff)
+    end
+
     return {
       model = "mercury-coder",
       messages = {
         {
           role = "user",
-          content = string.format(inception, "", hunk.file, hunk.context.before, text_with_cur, hunk.context.after, ""),
+          content = string.format(
+            inception,
+            "",
+            hunk.file,
+            hunk.context.before,
+            text_with_cur,
+            hunk.context.after,
+            table.concat(edit_history, "\n")
+          ),
         },
       },
     }
   end,
   handle_response = function(data)
     local content = data.choices[1].message.content
-    content = content:gsub("```[a-z]*\n?", "")
-    content = content:gsub("```", "")
+    -- vim.print(content)
+    content = content:gsub("```\n", "")
+    content = content:gsub("\n```", "")
     content = content:gsub("<|code_to_edit|>", "")
-    content = content:gsub("^%s+", "")
-    content = content:gsub("%s+$", "")
+    -- content = content:gsub("^%s+", "")
+    -- content = content:gsub("%s+$", "")
 
     return content
   end,
