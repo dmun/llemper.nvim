@@ -5,12 +5,6 @@ local log_file = vim.fn.stdpath("state") .. "/llemper.log"
 local function write_log(level, msg, data)
   data = data or {}
 
-  if #data == 1 then
-    data = data[1]
-  elseif #data > 1 and data[1] then
-    data = { data = data }
-  end
-
   local timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
 
   data.TIME = timestamp
@@ -35,24 +29,24 @@ local function write_log(level, msg, data)
   end)
 end
 
-function M.debug(...)
-  write_log("DEBUG", ...)
+function M.debug(msg, data)
+  write_log("DEBUG", msg, data)
 end
 
-function M.info(...)
-  write_log("INFO", ...)
+function M.info(msg, data)
+  write_log("INFO", msg, data)
 end
 
-function M.warn(...)
-  write_log("WARN", ...)
+function M.warn(msg, data)
+  write_log("WARN", msg, data)
 end
 
-function M.error(...)
-  write_log("ERROR", ...)
+function M.error(msg, data)
+  write_log("ERROR", msg, data)
 end
 
-function M.trace(...)
-  write_log("TRACE", ...)
+function M.trace(msg, data)
+  write_log("TRACE", msg, data)
 end
 
 return M

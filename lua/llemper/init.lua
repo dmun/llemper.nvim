@@ -15,6 +15,7 @@ local M = {}
 
 ---@class Suggestion
 ---@field text string
+---@field valid boolean
 ---@field diff Diff[][]
 
 ---@class Context
@@ -30,7 +31,6 @@ M.ignore_count = 0
 local last_buf_state = nil
 
 function M.update_edit_history()
-  -- local cur_buf_state = table.concat(vim.api.nvim_buf_get_lines(0, hunks[1].startline, hunks[1].endline, false), "\n")
   local cur_buf_state = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
   if last_buf_state then
     local diff = vim.text.diff(last_buf_state, cur_buf_state)
@@ -39,6 +39,35 @@ function M.update_edit_history()
   end
   last_buf_state = cur_buf_state
 end
+
+function M.get_current_hunk()
+  local hunk = vim.iter(hunks):find(function(hunk)
+    local row = vim.api.nvim_win_get_cursor(0)[1]
+    return (row > hunk.startline) and (row <= hunk.endline)
+  end)
+
+  if hunk then
+    log.info("Hunk not found")
+  else
+    log.info("Hunk found", hunk)
+  end
+
+  return hunk
+end
+
+function M.new_hunk()
+  local hunk = {}
+  hunk.startline = vim.fn.line(".") - 1
+  hunk.endline = hunk.startline + 4
+  hunk.file = vim.fn.expand("%:t")
+  hunk.context = {
+    before = table.concat(vim.api.nvim_buf_get_lines(0, 0, hunk.startline, false), "\n"),
+    after = table.concat(vim.api.nvim_buf_get_lines(0, hunk.endline - 1, -1, false), "\n"),
+  }
+  table.insert(hunks, hunk)
+end
+
+M.active_hunk = nil
 
 function M.setup(opts)
   opts = opts or {}
@@ -63,22 +92,16 @@ function M.setup(opts)
     pattern = "*",
     callback = function()
       if vim.tbl_isempty(hunks) then
-        local hunk = {}
-        hunk.startline = vim.fn.line(".") - 1
-        hunk.endline = hunk.startline + 4
-        hunk.file = vim.fn.expand("%:t")
-        hunk.context = {
-          before = table.concat(vim.api.nvim_buf_get_lines(0, 0, hunk.startline, false), "\n"),
-          after = table.concat(vim.api.nvim_buf_get_lines(0, hunk.endline - 1, -1, false), "\n"),
-        }
-
-        hunks[1] = hunk
-
-        M.suggest(hunks[1])
-
-        log.debug("hunk", hunk)
+        M.new_hunk()
+        local hunk = M.get_current_hunk()
+        M.suggest(hunk)
       else
-        local hunk = hunks[1]
+        local hunk = M.get_current_hunk()
+
+        if not hunk then
+          return
+        end
+
         ui.show_diff(hunk, { inline = true, overlay = true })
       end
     end,
@@ -89,31 +112,30 @@ function M.setup(opts)
     pattern = "*",
     callback = function()
       M.ignore_count = M.ignore_count + 1
+      local hunk = M.get_current_hunk()
 
       if M.skip then
         M.skip = false
         return
       end
 
-      if vim.tbl_isempty(hunks) then
+      if not hunk then
         return
       end
 
-      if not hunks[1].suggestions then
+      if not hunk.suggestions then
         return
       end
 
       ui.clear_ui()
-      M.update_hunk(hunks[1])
+      M.update_hunk(hunk)
 
+      M.ignore_count = 0
       if M.ignore_count > 2 then
-        M.ignore_count = 0
-
         M.update_edit_history()
-
-        M.suggest(hunks[1])
+        M.suggest(hunks)
       else
-        ui.show_diff(hunks[1], { inline = true, overlay = true })
+        ui.show_diff(hunk, { inline = true, overlay = true })
       end
     end,
     desc = "",
@@ -123,7 +145,7 @@ function M.setup(opts)
     pattern = "*",
     callback = function()
       M.update_edit_history()
-      hunks = {}
+      -- hunks = {}
       ui.clear_ui()
     end,
     desc = "Llemper: Clear diff extmarks on InsertLeave",
@@ -138,7 +160,7 @@ end
 
 ---@param hunk Hunk
 function M.suggest(hunk)
-  vim.print("suggesting..." .. vim.api.nvim_win_get_cursor(0)[2])
+  log.info("Suggesting..")
   local lines = vim.api.nvim_buf_get_lines(0, hunk.startline, hunk.endline, false)
   hunk.text = table.concat(lines, "\n")
 
@@ -156,7 +178,7 @@ end
 
 ---@pparam hunk Hunk
 function M.complete()
-  local hunk = hunks[1]
+  local hunk = M.get_current_hunk()
 
   local diff = vim.text.diff(hunk.text, hunk.suggestions[1].text)
   provider._edit_history:push(diff)

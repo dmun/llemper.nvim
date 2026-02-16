@@ -61,7 +61,7 @@ function M.diff_cleanupLines(diffs)
     processed_line = {}
   end
 
-  log.debug("Processed diff", { processed = processed })
+  -- log.trace("Processed diff", processed)
   return processed
 end
 
