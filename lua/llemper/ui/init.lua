@@ -1,5 +1,6 @@
 local log = require("llemper.logger")
 local dmp = require("llemper.dmp")
+-- local completion = require("llemper.completion")
 
 local M = {}
 
@@ -65,32 +66,32 @@ function M.diff_cleanupLines(diffs)
   return processed
 end
 
----@param hunk Hunk
+---@param suggestion Suggestion
 ---@param opts DiffDisplayOpts
-function M.show_diff(hunk, opts)
+function M.show_diff(suggestion, opts)
   opts = opts or {}
 
-  if hunk.suggestions == nil or vim.tbl_isempty(hunk.suggestions) then
-    return
-  end
+  local start_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.start_ext, {})
+  local end_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.end_ext, {})
 
-  local diff = dmp.diff_main(hunk.text, hunk.suggestions[1].text)
-  dmp.diff_cleanupSemantic(diff)
-  -- dmp.diff_cleanupEfficiency(diff)
-  diff = M.diff_cleanupLines(diff)
+  local text_lines = vim.api.nvim_buf_get_lines(0, start_pos[1], end_pos[1], false)
+  local orig_text = table.concat(text_lines, "\n")
 
-  hunk.suggestions[1].diff = diff
+  local dmp_diff = dmp.diff_main(orig_text, suggestion.text)
+  dmp.diff_cleanupSemantic(dmp_diff)
+  dmp.diff_cleanupEfficiency(dmp_diff)
+  dmp_diff = M.diff_cleanupLines(dmp_diff)
 
-  opts.overlay = vim.iter(diff):flatten():any(function(x)
+  opts.overlay = vim.iter(dmp_diff):flatten():any(function(x)
     return x[1] == 1 or x[1] == -1
   end)
 
-  log.trace("diff", { original = hunk.text, diff = hunk.suggestions[1].diff, opts = opts })
+  log.trace("diff", { original = orig_text, diff = dmp_diff, opts = opts })
 
   if opts.inline then
-    local start_line = hunk.startline
+    local start_line = start_pos[1]
 
-    for yi, diffs in ipairs(hunk.suggestions[1].diff) do
+    for yi, diffs in ipairs(dmp_diff) do
       local y_offset = yi - 1
       local start_col = 0
 
@@ -135,7 +136,7 @@ function M.show_diff(hunk, opts)
 
   if opts.overlay then
     local bufnr = vim.api.nvim_create_buf(false, true)
-    local suggestion_lines = vim.split(hunk.suggestions[1].text, "\n", { plain = true })
+    local suggestion_lines = vim.split(suggestion.text, "\n", { plain = true })
     vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, suggestion_lines)
 
     local win_width = 10
@@ -146,7 +147,7 @@ function M.show_diff(hunk, opts)
       end
     end
 
-    for yi, diffs in ipairs(hunk.suggestions[1].diff) do
+    for yi, diffs in ipairs(dmp_diff) do
       local cur_col = 0
       log.trace("Processing overlay diff lines", { yi = yi, diffs = diffs })
       for _, diff in ipairs(diffs) do
@@ -168,7 +169,7 @@ function M.show_diff(hunk, opts)
     end
 
     local widest = 0
-    for _, line in ipairs(vim.split(hunk.text, "\n")) do
+    for _, line in ipairs(vim.split(orig_text, "\n")) do
       local line_width = vim.fn.strdisplaywidth(line)
       if line_width > widest then
         widest = line_width
@@ -181,7 +182,7 @@ function M.show_diff(hunk, opts)
       width = win_width,
       height = #suggestion_lines,
       col = widest + 2,
-      bufpos = { hunk.startline - 1, 0 },
+      bufpos = { start_pos[1] - 1, 0 },
       anchor = "NW",
       style = "minimal",
       border = "none",
