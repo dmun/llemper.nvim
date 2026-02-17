@@ -99,9 +99,10 @@ function M.show_diff(suggestion, opts)
         local op, text = diff[1], diff[2]
         log.trace("Processing inline diff", { op = op, text = text })
 
-        if op == 1 and yi == 1 and not opts.overlay then
-          local extmark = vim.api.nvim_buf_set_extmark(0, ns_id, start_line, start_col, {
-            virt_text = { { text, "NonText" } },
+        if op == 1 then
+          local extmark_add_hl_group = string.find(text, "%S") and "NonText" or "DiffAddBg"
+          local extmark = vim.api.nvim_buf_set_extmark(0, ns_id, start_line + y_offset, start_col, {
+            virt_text = { { text, extmark_add_hl_group } },
             virt_text_pos = "inline",
             strict = false,
           })
@@ -120,7 +121,7 @@ function M.show_diff(suggestion, opts)
       end
     end
 
-    -- local lines = vim.split(hunk.suggestions[1].text, "\n")
+    -- local lines = vim.split(suggestion.text, "\n")
     -- local extmark = vim.api.nvim_buf_set_extmark(0, ns_id, start_line, 0, {
     --   virt_lines = vim
     --     .iter(lines)
