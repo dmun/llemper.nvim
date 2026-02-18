@@ -19,7 +19,7 @@ function M.suggest()
   local cur_pos = vim.api.nvim_win_get_cursor(0)
   cur_pos[1] = cur_pos[1] - 1
 
-  local start_row = cur_pos[1] - 2
+  local start_row = math.max(cur_pos[1] - 2, 0)
   local start_ext = vim.api.nvim_buf_set_extmark(0, _G.ns_id, start_row, 0, {})
 
   -- constrict row because for some reason strict = false doesnt work
