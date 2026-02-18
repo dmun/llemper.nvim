@@ -50,18 +50,16 @@ M.presets.mercury = {
     local text_after_cur = string.sub(cur_line, cur_pos[2] + 1)
 
     local lines_before = vim.api.nvim_buf_get_lines(0, start_pos[1], cur_pos[1] - 1, false)
-    local lines_after = vim.api.nvim_buf_get_lines(0, cur_pos[1], end_pos[1], false)
+    local lines_after = vim.api.nvim_buf_get_lines(0, cur_pos[1], end_pos[1] + 1, false)
 
     local context_before = vim.api.nvim_buf_get_lines(0, 0, start_pos[1], false)
-    local context_after = vim.api.nvim_buf_get_lines(0, start_pos[1], -1, false)
+    local context_after = vim.api.nvim_buf_get_lines(0, end_pos[1] + 1, -1, false)
 
     local text_lines = {}
     table.insert(text_lines, table.concat(lines_before, "\n"))
     table.insert(text_lines, text_before_cur .. "<|cursor|>" .. text_after_cur)
     table.insert(text_lines, table.concat(lines_after, "\n"))
     local text = table.concat(text_lines, "\n")
-
-    log.debug("Request", { text = text })
 
     local edit_history = {}
     for diff in M._edit_history:iter() do
@@ -88,7 +86,6 @@ M.presets.mercury = {
   end,
   handle_response = function(data)
     local content = data.choices[1].message.content
-    -- vim.print(content)
     content = content:gsub("```\n", "")
     content = content:gsub("\n```", "")
     content = content:gsub("<|code_to_edit|>", "")
@@ -164,7 +161,9 @@ function M.post(provider, suggestion, callback)
   local command = { "curl", provider.url, "-X", "POST" }
   vim.list_extend(command, headers)
   table.insert(command, "-d")
-  table.insert(command, vim.json.encode(provider.prepare_request(suggestion)))
+  local data = provider.prepare_request(suggestion)
+  log.debug(data.messages[1].content)
+  table.insert(command, vim.json.encode(data))
 
   vim.system(command, {}, function(res)
     if not res.stdout then

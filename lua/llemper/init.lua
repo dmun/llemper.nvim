@@ -50,6 +50,24 @@ function M.setup(opts)
     desc = "Llemper: Show inline diff on text change",
   })
 
+  vim.api.nvim_create_autocmd("TextChangedI", {
+    pattern = "*",
+    callback = function()
+      if completion.skip then
+        completion.skip = false
+        return
+      end
+
+      if not completion.suggestion.text then
+        return
+      end
+
+      ui.clear_ui()
+      ui.show_diff(completion.suggestion, { inline = true, overlay = true })
+    end,
+    desc = "Llemper: Show inline diff on text change",
+  })
+
   vim.api.nvim_create_autocmd("InsertLeave", {
     pattern = "*",
     callback = function()

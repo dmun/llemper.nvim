@@ -1,6 +1,5 @@
 local log = require("llemper.logger")
 local dmp = require("llemper.dmp")
--- local completion = require("llemper.completion")
 
 local M = {}
 
@@ -67,83 +66,88 @@ function M.diff_cleanupLines(diffs)
 end
 
 ---@param suggestion Suggestion
----@param opts DiffDisplayOpts
+---@param has_insertion boolean
+---@param has_deletion boolean
+function M.show_inline_diff(suggestion, has_insertion, has_deletion)
+  local start_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.start_ext, {})
+  local end_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.end_ext, {})
+
+  local text_lines = vim.api.nvim_buf_get_text(0, start_pos[1], start_pos[2], end_pos[1], end_pos[2], {})
+  local orig_text = table.concat(text_lines, "\n")
+
+  local diffs = dmp.diff_main(orig_text, suggestion.text)
+  dmp.diff_cleanupSemantic(diffs)
+  dmp.diff_cleanupEfficiency(diffs)
+
+  local byte_offset = vim.api.nvim_buf_get_offset(0, start_pos[1])
+  local cur_offset = 0
+
+  for _, diff in ipairs(diffs) do
+    local op, text = diff[1], diff[2]
+    log.trace("Processing inline diff", { op = op, text = text })
+
+    local row = vim.fn.byte2line(byte_offset + cur_offset + 1) - 1
+    local row_offset = vim.api.nvim_buf_get_offset(0, row)
+    local col = byte_offset + cur_offset - row_offset
+
+    if op == 1 and not has_deletion then
+      local extmark_add_hl_group = string.find(text, "%S") and "NonText" or "DiffAddBg"
+      local extmark = vim.api.nvim_buf_set_extmark(0, ns_id, row, col, {
+        virt_text = { { text, extmark_add_hl_group } },
+        virt_text_pos = "inline",
+        strict = false,
+      })
+      table.insert(extmarks, extmark)
+    elseif op == -1 and not has_insertion then
+      local extmark = vim.api.nvim_buf_set_extmark(0, ns_id, row, col, {
+        end_col = col + #text,
+        hl_group = "DiffDeleteBg",
+        hl_mode = "combine",
+        strict = false,
+      })
+      table.insert(extmarks, extmark)
+    end
+
+    if op ~= 1 then
+      cur_offset = cur_offset + #text
+    end
+  end
+end
+
+---@param suggestion Suggestion
+---@param opts DiffDisplayOpts?
 function M.show_diff(suggestion, opts)
   opts = opts or {}
 
   local start_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.start_ext, {})
   local end_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.end_ext, {})
 
-  local text_lines = vim.api.nvim_buf_get_lines(0, start_pos[1], end_pos[1], false)
+  local text_lines = vim.api.nvim_buf_get_text(0, start_pos[1], start_pos[2], end_pos[1], end_pos[2], {})
   local orig_text = table.concat(text_lines, "\n")
 
   local dmp_diff = dmp.diff_main(orig_text, suggestion.text)
   dmp.diff_cleanupSemantic(dmp_diff)
   dmp.diff_cleanupEfficiency(dmp_diff)
-  -- dmp_diff = M.diff_cleanupLines(dmp_diff)
 
-  -- opts.overlay = vim.iter(dmp_diff):flatten():any(function(x)
-  --   return x[1] == 1 or x[1] == -1
-  -- end)
+  local contains_deletion = false
+  local contains_insertion = false
+  for _, diff in ipairs(dmp_diff) do
+    if diff[1] == -1 then
+      contains_deletion = true
+    elseif diff[1] == 1 then
+      contains_insertion = true
+    end
+  end
+
+  opts.overlay = contains_insertion and contains_deletion
 
   log.trace("diff", { original = orig_text, diff = dmp_diff, opts = opts })
 
   if opts.inline then
-    local new_line = 0
-    local byte_offset = vim.api.nvim_buf_get_offset(0, start_pos[1])
-    local cur_offset = 0
-
-    for _, diff in ipairs(dmp_diff) do
-      local op, text = diff[1], diff[2]
-      log.trace("Processing inline diff", { op = op, text = text })
-
-      local row = vim.fn.byte2line(byte_offset + cur_offset + new_line)
-      vim.api.nvim_buf_set_text
-
-      new_line = 0
-      if string.find(text, "\n") then
-        new_line = 1
-      end
-
-      local row_offset = vim.api.nvim_buf_get_offset(0, row - 1)
-      local col = byte_offset + cur_offset - row_offset
-
-      if op == 1 then
-        local extmark_add_hl_group = string.find(text, "%S") and "NonText" or "DiffAddBg"
-        local extmark = vim.api.nvim_buf_set_extmark(0, ns_id, row - 1, col, {
-          virt_text = { { text, extmark_add_hl_group } },
-          virt_text_pos = "inline",
-          strict = false,
-        })
-        table.insert(extmarks, extmark)
-      elseif op == -1 then
-        local extmark = vim.api.nvim_buf_set_extmark(0, ns_id, row - 1, col, {
-          end_col = col + #text,
-          hl_group = "DiffDeleteBg",
-          strict = false,
-          hl_mode = "combine",
-        })
-        table.insert(extmarks, extmark)
-      elseif op == 0 then
-        cur_offset = cur_offset + #text
-      end
-    end
-
-    -- local lines = vim.split(suggestion.text, "\n")
-    -- local extmark = vim.api.nvim_buf_set_extmark(0, ns_id, start_line, 0, {
-    --   virt_lines = vim
-    --     .iter(lines)
-    --     :skip(1)
-    --     :map(function(line)
-    --       return { { line, "NonText" } }
-    --     end)
-    --     :totable(),
-    --   strict = true,
-    -- })
-    -- table.insert(extmarks, extmark)
+    M.show_inline_diff(suggestion, contains_insertion, contains_deletion)
   end
 
-  if opts.overlay then
+  if false and opts.overlay then
     local bufnr = vim.api.nvim_create_buf(false, true)
     local suggestion_lines = vim.split(suggestion.text, "\n", { plain = true })
     vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, suggestion_lines)
@@ -155,27 +159,6 @@ function M.show_diff(suggestion, opts)
         win_width = line_width
       end
     end
-
-    -- for yi, diffs in ipairs(dmp_diff) do
-    --   local cur_col = 0
-    --   log.trace("Processing overlay diff lines", { yi = yi, diffs = diffs })
-    --   for _, diff in ipairs(diffs) do
-    --     local op, text = diff[1], diff[2]
-    --     log.trace("Processing overlay diff", { op = op, text = text })
-    --
-    --     if op == 1 then
-    --       vim.api.nvim_buf_set_extmark(bufnr, ns_id, yi - 1, cur_col, {
-    --         end_col = cur_col + #text,
-    --         hl_group = "DiffAddBg",
-    --         virt_text_pos = "overlay",
-    --         strict = false,
-    --       })
-    --     end
-    --     if op ~= -1 then
-    --       cur_col = cur_col + #text
-    --     end
-    --   end
-    -- end
 
     local widest = 0
     for _, line in ipairs(vim.split(orig_text, "\n")) do
