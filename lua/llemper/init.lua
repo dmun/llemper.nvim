@@ -2,6 +2,7 @@ local log = require("llemper.logger")
 local dmp = require("llemper.dmp")
 local ui = require("llemper.ui")
 local provider = require("llemper.provider")
+local context = require("llemper.context")
 local completion = require("llemper.completion")
 
 _G.ns_id = vim.api.nvim_create_namespace("Llemper")
@@ -10,18 +11,6 @@ local M = {}
 
 M.skip = false
 M.ignore_count = 0
-
-local last_buf_state = nil
-
-function M.update_edit_history()
-  local cur_buf_state = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
-  if last_buf_state then
-    local diff = vim.text.diff(last_buf_state, cur_buf_state)
-    log.debug(diff)
-    provider._edit_history:push(diff)
-  end
-  last_buf_state = cur_buf_state
-end
 
 function M.setup(opts)
   opts = opts or {}
@@ -71,7 +60,7 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd("InsertLeave", {
     pattern = "*",
     callback = function()
-      M.update_edit_history()
+      context.update_edit_history()
       ui.clear_ui()
     end,
     desc = "Llemper: Clear diff extmarks on InsertLeave",
