@@ -1,5 +1,6 @@
 local log = require("llemper.logger")
 local provider = require("llemper.provider")
+local context = require("llemper.context")
 local ui = require("llemper.ui")
 
 ---@class Suggestion
@@ -8,32 +9,22 @@ local ui = require("llemper.ui")
 ---@field end_ext integer
 ---@field valid boolean
 
+---@class Range
+---@field start integer
+---@field end integer
+
 local M = {}
 
 ---@type Suggestion
 M.suggestion = nil
 
+---@type Suggestion[]
+M.suggestions = {}
+
 function M.suggest()
   log.info("Suggesting..")
 
-  local cur_pos = vim.api.nvim_win_get_cursor(0)
-  cur_pos[1] = cur_pos[1] - 1
-
-  local start_row = math.max(cur_pos[1] - 2, 0)
-  local start_ext = vim.api.nvim_buf_set_extmark(0, _G.ns_id, start_row, 0, {})
-
-  -- constrict row because for some reason strict = false doesnt work
-  local end_row = math.min(cur_pos[1] + 2, vim.api.nvim_buf_line_count(0) - 1)
-  local end_ext = vim.api.nvim_buf_set_extmark(0, _G.ns_id, end_row, -1, {})
-
-  M.suggestion = {
-    start_ext = start_ext,
-    end_ext = end_ext,
-    valid = false,
-  }
-
-  provider.post(provider.presets.mercury, M.suggestion, function(res)
-    M.suggestion.text = res
+  provider.request_prediction(provider.presets.mercury, function(res)
     vim.schedule(function()
       ui.clear_ui()
       ui.show_diff(M.suggestion, { inline = true, overlay = true })

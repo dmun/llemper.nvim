@@ -1,8 +1,9 @@
 local log = require("llemper.logger")
 local ringbuf = require("llemper.ringbuf")
+local context = require("llemper.context")
 -- local completion = require("llemper.completion")
 
-local inception = [[
+local inception_template = [[
 <|recently_viewed_code_snippets|>
 %s
 <|/recently_viewed_code_snippets|>
@@ -24,12 +25,10 @@ current_file_path: %s
 ---@class Preset
 ---@field url string
 ---@field headers string[]
----@field prepare_request fun(suggestion: Suggestion): table
+---@field prepare_request fun(): table
 ---@field handle_response fun(string): table
 
 local M = {}
-
-M._edit_history = ringbuf.new(5)
 
 ---@type table<string, Preset>
 M.presets = {}
@@ -40,46 +39,31 @@ M.presets.mercury = {
     "Content-Type: application/json",
     "Authorization: Bearer " .. os.getenv("INCEPTION_API_KEY"),
   },
-  prepare_request = function(suggestion)
-    local cur_pos = vim.api.nvim_win_get_cursor(0)
-    local start_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.start_ext, {})
-    local end_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.end_ext, {})
-
-    local cur_line = vim.api.nvim_get_current_line()
-    local text_before_cur = string.sub(cur_line, 0, cur_pos[2])
-    local text_after_cur = string.sub(cur_line, cur_pos[2] + 1)
-
-    local lines_before = vim.api.nvim_buf_get_lines(0, start_pos[1], cur_pos[1] - 1, false)
-    local lines_after = vim.api.nvim_buf_get_lines(0, cur_pos[1], end_pos[1] + 1, false)
-
-    local context_before = vim.api.nvim_buf_get_lines(0, 0, start_pos[1], false)
-    local context_after = vim.api.nvim_buf_get_lines(0, end_pos[1] + 1, -1, false)
-
-    local text_lines = {}
-    table.insert(text_lines, table.concat(lines_before, "\n"))
-    table.insert(text_lines, text_before_cur .. "<|cursor|>" .. text_after_cur)
-    table.insert(text_lines, table.concat(lines_after, "\n"))
-    local text = table.concat(text_lines, "\n")
+  prepare_request = function()
+    local ctx = context.get_context()
+    local cursor_tag = "<|cursor|>"
 
     local edit_history = {}
     for diff in M._edit_history:iter() do
       table.insert(edit_history, diff)
     end
 
+    local prompt = string.format(
+      inception_template,
+      "",
+      ctx.file,
+      ctx.before_context,
+      ctx.editable_text_before_cursor .. cursor_tag .. ctx.editable_text_after_cursor,
+      ctx.after_context,
+      table.concat(edit_history, "\n")
+    )
+
     return {
       model = "mercury-coder",
       messages = {
         {
           role = "user",
-          content = string.format(
-            inception,
-            "",
-            vim.fn.expand("%"),
-            table.concat(context_before, "\n"),
-            text,
-            table.concat(context_after, "\n"),
-            table.concat(edit_history, "\n")
-          ),
+          content = prompt,
         },
       },
     }
@@ -88,7 +72,7 @@ M.presets.mercury = {
     local content = data.choices[1].message.content
     content = content:gsub("```\n", "")
     content = content:gsub("\n```", "")
-    content = content:gsub("<|code_to_edit|>", "")
+    -- content = content:gsub("<|code_to_edit|>", "")
     -- content = content:gsub("^%s+", "")
     -- content = content:gsub("%s+$", "")
 
@@ -147,9 +131,8 @@ M.presets.codestral = {
 ---@field finish_reason string
 
 ---@param provider Preset
----@param suggestion Suggestion
 ---@param callback function
-function M.post(provider, suggestion, callback)
+function M.request_prediction(provider, callback)
   local headers = vim
     .iter(provider.headers)
     :map(function(header)
@@ -161,8 +144,9 @@ function M.post(provider, suggestion, callback)
   local command = { "curl", provider.url, "-X", "POST" }
   vim.list_extend(command, headers)
   table.insert(command, "-d")
-  local data = provider.prepare_request(suggestion)
+  local data = provider.prepare_request()
   log.debug(data.messages[1].content)
+
   table.insert(command, vim.json.encode(data))
 
   vim.system(command, {}, function(res)
