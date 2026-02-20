@@ -29,59 +29,32 @@ end
 ---| 1 # insertion
 ---| -1 # deletion
 
----@alias Diff { [1]: operation, [2]: string }
-
---- Preprocess diff itmes to be separated by lines.
----@param diffs Diff[]
----@return Diff[][]
-function M.diff_cleanupLines(diffs)
-  local processed = {}
-  local processed_line = {}
-
-  for _, diff in ipairs(diffs) do
-    local op, text = diff[1], diff[2]
-    log.trace("Processing diff", { op = op, text = text })
-
-    local lines = vim.split(text, "\n", { plain = true })
-    log.trace("Split text into lines", { lines = lines })
-
-    for i, line in ipairs(lines) do
-      if i < #lines then
-        table.insert(processed_line, { op, line })
-        table.insert(processed, processed_line)
-        processed_line = {}
-      else
-        table.insert(processed_line, { op, line })
-      end
+---@param lines string[]
+function M.get_widest(lines)
+  local widest = 0
+  for _, line in ipairs(lines) do
+    local line_width = vim.fn.strdisplaywidth(line)
+    if line_width > widest then
+      widest = line_width
     end
   end
-
-  if #processed_line > 0 then
-    table.insert(processed, processed_line)
-    processed_line = {}
-  end
-
-  -- log.trace("Processed diff", processed)
-  return processed
+  return widest
 end
 
---- Show inline diff in the buffer with extmarks
+---Show inline diff in the buffer with extmarks
 ---@param suggestion Suggestion
----@param has_insertion boolean
----@param has_deletion boolean
----@param line_diffs Diff[][]  -- Pre-processed line-based diffs
-function M.show_inline_diff(suggestion, has_insertion, has_deletion, line_diffs)
-  local start_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.start_ext, {})
+function M.show_inline_diff(suggestion)
+  local start_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.extmark_id, {})
 
   local row = start_pos[1]
 
-  for yi, line_diff in ipairs(line_diffs) do
+  for yi, diff_line in ipairs(suggestion.diff_lines) do
     local col = 0
 
-    for _, diff in ipairs(line_diff) do
+    for _, diff in ipairs(diff_line) do
       local op, text = diff[1], diff[2]
 
-      if op == 1 and not has_deletion then
+      if op == 1 then
         local extmark_add_hl_group = string.find(text, "%S") and "NonText" or "DiffAddBg"
         local extmark = vim.api.nvim_buf_set_extmark(0, ns_id, row + yi - 1, col, {
           virt_text = { { text, extmark_add_hl_group } },
@@ -106,38 +79,20 @@ function M.show_inline_diff(suggestion, has_insertion, has_deletion, line_diffs)
   end
 end
 
-function M.show_popup_diff(suggestion, line_diffs)
-  local start_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.start_ext, {})
-  local end_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.end_ext, {})
-
-  local text_lines = vim.api.nvim_buf_get_text(0, start_pos[1], start_pos[2], end_pos[1], end_pos[2], {})
-  local orig_text = table.concat(text_lines, "\n")
+---@param suggestion Suggestion
+function M.show_popup_diff(suggestion)
+  local start_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.extmark_id, {})
+  local text_lines = vim.api.nvim_buf_get_lines(0, start_pos[1], start_pos[1] + #suggestion.diff_lines, false)
 
   local bufnr = vim.api.nvim_create_buf(false, true)
   local suggestion_lines = vim.split(suggestion.text, "\n", { plain = true })
   vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, suggestion_lines)
 
-  local win_width = 10
-  for _, line in ipairs(suggestion_lines) do
-    local line_width = vim.fn.strdisplaywidth(line)
-    if line_width > win_width then
-      win_width = line_width
-    end
-  end
-
-  local widest = 0
-  for _, line in ipairs(vim.split(orig_text, "\n")) do
-    local line_width = vim.fn.strdisplaywidth(line)
-    if line_width > widest then
-      widest = line_width
-    end
-  end
-
   local row = 0
-  for yi, line_diff in ipairs(line_diffs) do
+  for yi, diff_line in ipairs(suggestion.diff_lines) do
     local col = 0
 
-    for _, diff in ipairs(line_diff) do
+    for _, diff in ipairs(diff_line) do
       local op, text = diff[1], diff[2]
 
       if op == 1 then
@@ -159,9 +114,9 @@ function M.show_popup_diff(suggestion, line_diffs)
   popup_win = vim.api.nvim_open_win(bufnr, false, {
     win = 0,
     relative = "win",
-    width = win_width,
+    width = M.get_widest(suggestion_lines),
     height = #suggestion_lines,
-    col = widest + 2,
+    col = M.get_widest(text_lines) + 2,
     bufpos = { start_pos[1] - 1, 0 },
     anchor = "NW",
     style = "minimal",
@@ -176,39 +131,12 @@ end
 function M.show_diff(suggestion, opts)
   opts = opts or {}
 
-  local start_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.start_ext, {})
-  local end_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.end_ext, {})
-
-  local text_lines = vim.api.nvim_buf_get_text(0, start_pos[1], start_pos[2], end_pos[1], end_pos[2], {})
-  local orig_text = table.concat(text_lines, "\n")
-
-  local diffs = dmp.diff_main(orig_text, suggestion.text)
-  dmp.diff_cleanupSemantic(diffs)
-  dmp.diff_cleanupEfficiency(diffs)
-
-  local contains_deletion = false
-  local contains_insertion = false
-  for _, diff in ipairs(diffs) do
-    if diff[1] == -1 then
-      contains_deletion = true
-    elseif diff[1] == 1 then
-      contains_insertion = true
-    end
-  end
-
-  -- Split diffs by lines for proper inline rendering
-  diffs = M.diff_cleanupLines(diffs)
-
-  opts.overlay = contains_insertion and contains_deletion
-
-  log.trace("diff", { original = orig_text, diff = diffs, opts = opts })
-
   if opts.inline then
-    M.show_inline_diff(suggestion, contains_insertion, contains_deletion, diffs)
+    M.show_inline_diff(suggestion)
   end
 
   if opts.overlay then
-    M.show_popup_diff(suggestion, diffs)
+    M.show_popup_diff(suggestion)
   end
 end
 

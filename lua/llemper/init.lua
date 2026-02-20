@@ -47,12 +47,8 @@ function M.setup(opts)
         return
       end
 
-      if not completion.suggestion.text then
-        return
-      end
-
       ui.clear_ui()
-      ui.show_diff(completion.suggestion, { inline = true, overlay = true })
+      -- ui.show_diff(completion.suggestion, { inline = true, overlay = true })
     end,
     desc = "Llemper: Show inline diff on text change",
   })

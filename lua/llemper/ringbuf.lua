@@ -32,14 +32,13 @@ function M:get(i)
   return self.data[physical_idx]
 end
 
-function M:iter()
-  local i = 0
-  return function()
-    i = i + 1
-    if i <= self.count then
-      return self:get(i)
-    end
+function M:totable()
+  local result = {}
+  for i = 1, self.count do
+    local physical_idx = ((self.head - 1 - i) % self.max_size) + 1
+    result[i] = self.data[physical_idx]
   end
+  return result
 end
 
 return M

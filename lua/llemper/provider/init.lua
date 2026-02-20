@@ -25,7 +25,7 @@ current_file_path: %s
 ---@class Preset
 ---@field url string
 ---@field headers string[]
----@field prepare_request fun(): table
+---@field prepare_request fun(ctx: Context): table
 ---@field handle_response fun(string): table
 
 local M = {}
@@ -39,23 +39,17 @@ M.presets.mercury = {
     "Content-Type: application/json",
     "Authorization: Bearer " .. os.getenv("INCEPTION_API_KEY"),
   },
-  prepare_request = function()
-    local ctx = context.get_context()
+  prepare_request = function(ctx)
     local cursor_tag = "<|cursor|>"
 
-    local edit_history = {}
-    for diff in M._edit_history:iter() do
-      table.insert(edit_history, diff)
-    end
-
-    local prompt = string.format(
+    local content = string.format(
       inception_template,
       "",
       ctx.file,
       ctx.before_context,
       ctx.editable_text_before_cursor .. cursor_tag .. ctx.editable_text_after_cursor,
       ctx.after_context,
-      table.concat(edit_history, "\n")
+      ctx.edit_history
     )
 
     return {
@@ -63,7 +57,7 @@ M.presets.mercury = {
       messages = {
         {
           role = "user",
-          content = prompt,
+          content = content,
         },
       },
     }
@@ -72,10 +66,6 @@ M.presets.mercury = {
     local content = data.choices[1].message.content
     content = content:gsub("```\n", "")
     content = content:gsub("\n```", "")
-    -- content = content:gsub("<|code_to_edit|>", "")
-    -- content = content:gsub("^%s+", "")
-    -- content = content:gsub("%s+$", "")
-
     return content
   end,
 }
@@ -131,8 +121,9 @@ M.presets.codestral = {
 ---@field finish_reason string
 
 ---@param provider Preset
+---@param ctx Context
 ---@param callback function
-function M.request_prediction(provider, callback)
+function M.request_prediction(provider, ctx, callback)
   local headers = vim
     .iter(provider.headers)
     :map(function(header)
@@ -144,7 +135,7 @@ function M.request_prediction(provider, callback)
   local command = { "curl", provider.url, "-X", "POST" }
   vim.list_extend(command, headers)
   table.insert(command, "-d")
-  local data = provider.prepare_request()
+  local data = provider.prepare_request(ctx)
   log.debug(data.messages[1].content)
 
   table.insert(command, vim.json.encode(data))
