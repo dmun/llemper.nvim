@@ -98,6 +98,14 @@ function M.diffLines_toHunks(diff_lines)
   return hunks
 end
 
+---@param diffs Diff[]
+function M.has_changes(diffs)
+  if #diffs == 1 and diffs[1][1] == 0 then
+    return false
+  end
+  return true
+end
+
 function M.suggest()
   log.info("Suggesting..")
   local ctx = context.get_context()
@@ -106,6 +114,12 @@ function M.suggest()
     log.debug(res)
 
     local diffs = dmp.diff_main(ctx.editable_text, res)
+
+    log.debug(diffs)
+    if not M.has_changes(diffs) then
+      return
+    end
+
     dmp.diff_cleanupSemantic(diffs)
     dmp.diff_cleanupEfficiency(diffs)
     local diff_lines = M.diff_toLines(diffs)
@@ -115,7 +129,9 @@ function M.suggest()
 
     vim.schedule(function()
       for _, diff_hunk in ipairs(diff_hunks) do
-        local extmark_id = vim.api.nvim_buf_set_extmark(0, _G.ns_id, ctx.editable_range[1] + diff_hunk.offset, 0, {})
+        local extmark_id = vim.api.nvim_buf_set_extmark(0, _G.ns_id, ctx.editable_range[1] + diff_hunk.offset, 0, {
+          right_gravity = false,
+        })
         local suggestion_text = vim
           .iter(vim.split(res, "\n"))
           :slice(diff_hunk.offset + 1, diff_hunk.offset + #diff_hunk.diff_lines)
@@ -134,6 +150,31 @@ function M.suggest()
   end)
 end
 
+function M.get_new_cursor_position(suggestion)
+  local start_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.extmark_id, {})
+  local last_diff_line = suggestion.diff_lines[#suggestion.diff_lines]
+  local col_offset = nil
+
+  vim.iter(last_diff_line):rev():each(function(diff)
+    local op, text = diff[1], diff[2]
+
+    if not col_offset and op ~= 0 then
+      col_offset = 0
+    end
+
+    if col_offset and op ~= -1 then
+      col_offset = col_offset + #text
+    end
+  end)
+
+  local new_cursor_position = {
+    start_pos[1] + #suggestion.diff_lines,
+    col_offset + 1,
+  }
+
+  return new_cursor_position
+end
+
 ---@param suggestion Suggestion
 function M.complete(suggestion)
   suggestion = suggestion or M.suggestions[1]
@@ -141,8 +182,8 @@ function M.complete(suggestion)
   local start_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.extmark_id, {})
   local text_lines = vim.api.nvim_buf_get_lines(0, start_pos[1], start_pos[1] + #suggestion.diff_lines, false)
 
-  local diff = vim.text.diff(table.concat(text_lines, "\n"), suggestion.text)
-  context.edit_history:push(diff)
+  local diff_text = vim.text.diff(table.concat(text_lines, "\n"), suggestion.text)
+  context.edit_history:push(diff_text)
 
   local edits = {
     {
@@ -162,6 +203,8 @@ function M.complete(suggestion)
 
   M.skip = true
   vim.lsp.util.apply_text_edits(edits, vim.api.nvim_win_get_buf(0), "utf-8")
+  local new_cursor_position = M.get_new_cursor_position(suggestion)
+  vim.fn.cursor(new_cursor_position)
   ui.clear_ui()
 end
 

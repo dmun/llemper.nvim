@@ -58,6 +58,7 @@ function M.setup(opts)
     callback = function()
       context.update_edit_history()
       ui.clear_ui()
+      completion.suggestions = {}
     end,
     desc = "Llemper: Clear diff extmarks on InsertLeave",
   })
