@@ -37,7 +37,7 @@ end
 function context.get_context(cursor_position, opts)
   opts = {
     context_size = 20,
-    editable_region_size = 3,
+    editable_region_size = 8,
   }
 
   if not cursor_position then
@@ -83,21 +83,6 @@ function context.get_context(cursor_position, opts)
     after_context = after_context,
     edit_history = edit_history,
   }
-end
-
----@param cursor_position [integer, integer]?
----@return [integer, integer]
-function context.get_editable_range(cursor_position)
-  if not cursor_position then
-    cursor_position = vim.api.nvim_win_get_cursor(0)
-    -- keep zero-based
-    cursor_position[1] = cursor_position[1] - 1
-  end
-
-  local start_row = math.max(cursor_position[1] - 3, 0)
-  local end_row = math.min(cursor_position[1] + 3, vim.api.nvim_buf_line_count(0) - 1)
-
-  return { start_row, end_row }
 end
 
 return context

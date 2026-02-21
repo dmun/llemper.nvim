@@ -6,6 +6,7 @@ local context = require("llemper.context")
 local completion = require("llemper.completion")
 
 _G.ns_id = vim.api.nvim_create_namespace("Llemper")
+_G.ns_id2 = vim.api.nvim_create_namespace("Llemper2")
 
 local M = {}
 
@@ -34,7 +35,12 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd("InsertEnter", {
     pattern = "*",
     callback = function()
-      completion.suggest()
+      if vim.tbl_isempty(completion.suggestions) then
+        completion.suggest()
+      else
+        local current_suggestion = completion.get_suggestion_under_cursor()
+        completion.show_suggestions(current_suggestion)
+      end
     end,
     desc = "Llemper: Show inline diff on text change",
   })
@@ -48,7 +54,8 @@ function M.setup(opts)
       end
 
       ui.clear_ui()
-      -- ui.show_diff(completion.suggestion, { inline = true, overlay = true })
+      local current_suggestion = completion.get_suggestion_under_cursor()
+      completion.show_suggestions(current_suggestion)
     end,
     desc = "Llemper: Show inline diff on text change",
   })
@@ -58,7 +65,14 @@ function M.setup(opts)
     callback = function()
       context.update_edit_history()
       ui.clear_ui()
-      completion.suggestions = {}
+    end,
+    desc = "Llemper: Clear diff extmarks on InsertLeave",
+  })
+
+  vim.api.nvim_create_autocmd("CursorMoved", {
+    pattern = "*",
+    callback = function()
+      -- completion.suggestions = {}
     end,
     desc = "Llemper: Clear diff extmarks on InsertLeave",
   })

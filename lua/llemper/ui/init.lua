@@ -3,15 +3,15 @@ local dmp = require("llemper.dmp")
 
 local M = {}
 
-local ns_id = vim.api.nvim_create_namespace("llemper_diff")
-local extmarks = {}
+M.extmarks = {}
 local popup_win
 
 function M.clear_ui()
-  for _, extmark in ipairs(extmarks) do
-    vim.api.nvim_buf_del_extmark(0, ns_id, extmark)
+  for _, extmark in ipairs(M.extmarks) do
+    log.debug("Clearing", extmark)
+    vim.api.nvim_buf_del_extmark(0, _G.ns_id, extmark)
   end
-  extmarks = {}
+  M.extmarks = {}
 
   if popup_win and vim.api.nvim_win_is_valid(popup_win) then
     vim.api.nvim_win_close(popup_win, true)
@@ -41,10 +41,24 @@ function M.get_widest(lines)
   return widest
 end
 
+---@param extmark_id integer
+function M.show_next_edit(extmark_id)
+  local suggestion_line = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id2, extmark_id, {})[1]
+  local extmark = vim.api.nvim_buf_set_extmark(0, _G.ns_id, suggestion_line, 0, {
+    virt_text = { { " S-TAB ", "CursorLine" } },
+    virt_text_pos = "eol",
+    right_gravity = false,
+    strict = false,
+  })
+  table.insert(M.extmarks, extmark)
+end
+
 ---Show inline diff in the buffer with extmarks
 ---@param suggestion Suggestion
-function M.show_inline_diff(suggestion)
-  local start_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.extmark_id, {})
+---@param has_insertions boolean
+---@param has_deletions boolean
+function M.show_inline_diff(suggestion, has_insertions, has_deletions)
+  local start_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id2, suggestion.extmark_id, {})
 
   local row = start_pos[1]
 
@@ -54,22 +68,22 @@ function M.show_inline_diff(suggestion)
     for _, diff in ipairs(diff_line) do
       local op, text = diff[1], diff[2]
 
-      if op == 1 then
+      if op == 1 and not has_deletions then
         local extmark_add_hl_group = string.find(text, "%S") and "NonText" or "DiffAddBg"
-        local extmark = vim.api.nvim_buf_set_extmark(0, ns_id, row + yi - 1, col, {
+        local extmark = vim.api.nvim_buf_set_extmark(0, _G.ns_id, row + yi - 1, col, {
           virt_text = { { text, extmark_add_hl_group } },
           virt_text_pos = "inline",
           strict = false,
         })
-        table.insert(extmarks, extmark)
-      elseif op == -1 then
-        local extmark = vim.api.nvim_buf_set_extmark(0, ns_id, row + yi - 1, col, {
+        table.insert(M.extmarks, extmark)
+      elseif op == -1 and (has_insertions and has_deletions) then
+        local extmark = vim.api.nvim_buf_set_extmark(0, _G.ns_id, row + yi - 1, col, {
           end_col = col + #text,
           hl_group = "DiffDeleteBg",
           hl_mode = "combine",
           strict = false,
         })
-        table.insert(extmarks, extmark)
+        table.insert(M.extmarks, extmark)
       end
 
       if op ~= 1 then
@@ -81,7 +95,7 @@ end
 
 ---@param suggestion Suggestion
 function M.show_popup_diff(suggestion)
-  local start_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id, suggestion.extmark_id, {})
+  local start_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id2, suggestion.extmark_id, {})
   local text_lines = vim.api.nvim_buf_get_lines(0, start_pos[1], start_pos[1] + #suggestion.diff_lines, false)
 
   local bufnr = vim.api.nvim_create_buf(false, true)
@@ -96,13 +110,13 @@ function M.show_popup_diff(suggestion)
       local op, text = diff[1], diff[2]
 
       if op == 1 then
-        local extmark = vim.api.nvim_buf_set_extmark(bufnr, ns_id, row + yi - 1, col, {
+        local extmark = vim.api.nvim_buf_set_extmark(bufnr, _G.ns_id, row + yi - 1, col, {
           end_col = col + #text,
           hl_group = "DiffAddBg",
           hl_mode = "combine",
           strict = false,
         })
-        table.insert(extmarks, extmark)
+        table.insert(M.extmarks, extmark)
       end
 
       if op ~= -1 then
@@ -131,11 +145,19 @@ end
 function M.show_diff(suggestion, opts)
   opts = opts or {}
 
-  if opts.inline then
-    M.show_inline_diff(suggestion)
-  end
+  local has_insertions = false
+  local has_deletions = false
+  vim.iter(suggestion.diff_lines):flatten():each(function(diff)
+    if diff[1] == -1 then
+      has_deletions = true
+    elseif diff[1] == 1 then
+      has_insertions = true
+    end
+  end)
 
-  if opts.overlay then
+  M.show_inline_diff(suggestion, has_insertions, has_deletions)
+
+  if has_insertions and has_deletions then
     M.show_popup_diff(suggestion)
   end
 end
