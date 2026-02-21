@@ -69,9 +69,11 @@ function M.setup(opts)
     desc = "Llemper: Clear diff extmarks on InsertLeave",
   })
 
-  vim.api.nvim_create_autocmd("CursorMoved", {
+  vim.api.nvim_create_autocmd("CursorMovedI", {
     pattern = "*",
     callback = function()
+      local current_suggestion = completion.get_suggestion_under_cursor()
+      completion.show_suggestions(current_suggestion)
       -- completion.suggestions = {}
     end,
     desc = "Llemper: Clear diff extmarks on InsertLeave",

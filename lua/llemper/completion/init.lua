@@ -222,11 +222,23 @@ function M.get_new_cursor_position(suggestion)
   return new_cursor_position
 end
 
+function M.jump_to_next_suggestion()
+  local extmark_id, suggestion = next(M.suggestions)
+  if not extmark_id then
+    log.info("No next suggestion")
+  end
+  local new_line = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id2, extmark_id, {})[1]
+  local new_col = M.get_new_cursor_position(suggestion)[2]
+  vim.fn.cursor(new_line + 1, new_col)
+end
+
 ---@param suggestion Suggestion
 function M.complete(suggestion)
   suggestion = suggestion or M.get_suggestion_under_cursor()
 
   if not suggestion then
+    M.jump_to_next_suggestion()
+    ui.clear_ui()
     log.info("No suggestion active")
     return
   end
@@ -257,6 +269,9 @@ function M.complete(suggestion)
       newText = suggestion.text,
     },
   }
+
+  -- create undo point
+  vim.cmd([[call feedkeys("\<c-g>u", "n")]])
 
   -- M.skip = true
   vim.lsp.util.apply_text_edits(edits, vim.api.nvim_win_get_buf(0), "utf-8")
