@@ -10,9 +10,6 @@ _G.ns_id2 = vim.api.nvim_create_namespace("Llemper2")
 
 local M = {}
 
-M.skip = false
-M.ignore_count = 0
-
 function M.setup(opts)
   opts = opts or {}
   opts.debounce = opts.debounce or 200
