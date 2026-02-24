@@ -1,14 +1,19 @@
 local log = require("llemper.logger")
 local dmp = require("llemper.dmp")
 local ui = require("llemper.ui")
-local provider = require("llemper.provider")
 local context = require("llemper.context")
 local completion = require("llemper.completion")
-
-_G.ns_id = vim.api.nvim_create_namespace("Llemper")
-_G.ns_id2 = vim.api.nvim_create_namespace("Llemper2")
+local state = require("llemper.state")
 
 local M = {}
+
+local function setup_highlights()
+  local hl = vim.api.nvim_get_hl(0, { name = "DiffDelete" })
+  vim.api.nvim_set_hl(0, "DiffDeleteBg", { bg = hl.bg })
+
+  hl = vim.api.nvim_get_hl(0, { name = "DiffAdd" })
+  vim.api.nvim_set_hl(0, "DiffAddBg", { bg = hl.bg })
+end
 
 function M.setup(opts)
   opts = opts or {}
@@ -19,24 +24,20 @@ function M.setup(opts)
     Match_Distance = 100,
   })
 
+  setup_highlights()
+
   vim.keymap.set("i", "<S-Tab>", completion.complete)
-
-  local hl = vim.api.nvim_get_hl(0, { name = "DiffDelete" })
-  vim.api.nvim_set_hl(0, "DiffDeleteBg", { bg = hl.bg })
-
-  hl = vim.api.nvim_get_hl(0, { name = "DiffAdd" })
-  vim.api.nvim_set_hl(0, "DiffAddBg", { bg = hl.bg })
 
   log.info("Llemper initialized")
 
   vim.api.nvim_create_autocmd("InsertEnter", {
     pattern = "*",
-    callback = function()
-      if vim.tbl_isempty(completion.suggestions) then
-        completion.suggest()
+    callback = function(ev)
+      local buf_state = state.get_buf_state(ev.buf)
+      if buf_state.active_suggestion then
+        completion.show_suggestions(ev.buf)
       else
-        local current_suggestion = completion.get_suggestion_under_cursor()
-        completion.show_suggestions(current_suggestion)
+        completion.suggest(ev.buf)
       end
     end,
     desc = "Llemper: Show inline diff on text change",
@@ -44,13 +45,14 @@ function M.setup(opts)
 
   vim.api.nvim_create_autocmd("TextChangedI", {
     pattern = "*",
-    callback = function()
+    callback = function(ev)
       if completion.skip then
         completion.skip = false
         return
       end
 
-      ui.clear_ui()
+      ui.clear_ui(ev.buf)
+
       local current_suggestion = completion.get_suggestion_under_cursor()
       completion.show_suggestions(current_suggestion)
     end,
@@ -59,9 +61,9 @@ function M.setup(opts)
 
   vim.api.nvim_create_autocmd("InsertLeave", {
     pattern = "*",
-    callback = function()
+    callback = function(ev)
       context.update_edit_history()
-      ui.clear_ui()
+      ui.clear_ui(ev.buf)
     end,
     desc = "Llemper: Clear diff extmarks on InsertLeave",
   })

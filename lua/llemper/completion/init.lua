@@ -4,21 +4,19 @@ local provider = require("llemper.provider")
 local context = require("llemper.context")
 local dmp = require("llemper.dmp")
 local ui = require("llemper.ui")
+local C = require("llemper.constants")
+local state = require("llemper.state")
 
 ---@class Suggestion
 ---@field text string|nil
 ---@field diff_lines DiffLine[]
 ---@field extmark_id integer
----@field valid boolean
 
 ---@class Range
 ---@field start integer
 ---@field end integer
 
 local M = {}
-
----@type table<integer, Suggestion>
-M.suggestions = {}
 
 ---@alias Diff { [1]: operation, [2]: string }
 
@@ -106,11 +104,12 @@ function M.has_changes(diffs)
 end
 
 function M.get_suggestion_under_cursor(cursor)
+  local buf_state = state.get_buf_state(0)
   cursor = cursor or H.get_zero_cursor()
   log.debug("Cursor", vim.inspect(cursor))
 
-  for extmark_id, suggestion in pairs(M.suggestions) do
-    local extmark = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id2, extmark_id, {})
+  for extmark_id, suggestion in pairs(buf_state.suggestions) do
+    local extmark = vim.api.nvim_buf_get_extmark_by_id(0, C.hunk_ns_id, extmark_id, {})
 
     if extmark[1] then
       log.debug("Comparing", { cursor = cursor, extmark = extmark })
@@ -125,25 +124,30 @@ function M.get_suggestion_under_cursor(cursor)
   return nil
 end
 
+---@param buffer integer
 ---@param extmark_id integer
-function M.clear_suggestion(extmark_id)
-  vim.api.nvim_buf_del_extmark(0, _G.ns_id2, extmark_id)
-  M.suggestions[extmark_id] = nil
+function M.clear_suggestion(buffer, extmark_id)
+  local buf_state = state.get_buf_state(buffer)
+  vim.api.nvim_buf_del_extmark(buffer, C.hunk_ns_id, extmark_id)
+  buf_state.suggestions[extmark_id] = nil
 end
 
----@param suggestion Suggestion|nil
-function M.show_suggestions(suggestion)
-  local extmark_id = next(M.suggestions)
-  if suggestion then
-    ui.show_diff(suggestion, { inline = true, overlay = true })
+---@param buffer integer
+function M.show_suggestions(buffer)
+  local buf_state = state.get_buf_state(buffer)
+  local extmark_id = next(buf_state.suggestions)
+  if buf_state.active_suggestion then
+    ui.show_diff(buf_state.active_suggestion)
   elseif extmark_id then
     ui.show_next_edit(extmark_id)
   end
 end
 
-function M.suggest()
-  log.info("Suggesting..")
+---@param buffer integer
+function M.suggest(buffer)
+  log.info("Suggesting for buffer", buffer)
   local ctx = context.get_context()
+  local buf_state = state.get_buf_state(buffer)
 
   provider.request_prediction(provider.presets.mercury, ctx, function(res)
     log.debug("Response", res)
@@ -166,39 +170,33 @@ function M.suggest()
       for _, diff_hunk in ipairs(diff_hunks) do
         log.debug("new extmark")
 
-        local extmark_id = vim.api.nvim_buf_set_extmark(0, _G.ns_id2, ctx.editable_range[1] + diff_hunk.offset, 0, {
-          -- virt_text = { { "!", "DiffText" } },
-          -- virt_text_pos = "eol",
-          -- virt_text_hide = true,
-          right_gravity = false,
-          strict = false,
-        })
+        local extmark_id =
+          vim.api.nvim_buf_set_extmark(buffer, C.hunk_ns_id, ctx.editable_range[1] + diff_hunk.offset, 0, {
+            right_gravity = false,
+            strict = false,
+          })
 
         local suggestion_text = vim
           .iter(vim.split(res, "\n"))
           :slice(diff_hunk.offset + 1, diff_hunk.offset + #diff_hunk.diff_lines)
           :join("\n")
 
-        M.suggestions[extmark_id] = {
+        buf_state.suggestions[extmark_id] = {
           extmark_id = extmark_id,
           text = suggestion_text,
           diff_lines = diff_hunk.diff_lines,
-          valid = true,
         }
       end
 
-      local current_suggestion = M.get_suggestion_under_cursor(ctx.cursor_position)
-      log.debug("Current suggestion", current_suggestion)
-      M.show_suggestions(current_suggestion)
-      -- if current_suggestion then
-      --   ui.show_diff(current_suggestion, { inline = true, overlay = true })
-      -- end
+      buf_state.active_suggestion = M.get_suggestion_under_cursor(ctx.cursor_position)
+      log.debug("Current suggestion", buf_state.active_suggestion)
+      M.show_suggestions(buffer)
     end)
   end)
 end
 
 function M.get_new_cursor_position(suggestion)
-  local start_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id2, suggestion.extmark_id, {})
+  local start_pos = vim.api.nvim_buf_get_extmark_by_id(0, C.hunk_ns_id, suggestion.extmark_id, {})
   local last_diff_line = suggestion.diff_lines[#suggestion.diff_lines]
   local col_offset = nil
 
@@ -222,36 +220,43 @@ function M.get_new_cursor_position(suggestion)
   return new_cursor_position
 end
 
-function M.jump_to_next_suggestion()
-  local extmark_id, suggestion = next(M.suggestions)
+function M.jump_to_next_suggestion(buffer)
+  local buf_state = state.get_buf_state(buffer)
+
+  local extmark_id, suggestion = next(buf_state.suggestions)
   if not extmark_id then
     log.info("No next suggestion")
+    return
   end
-  local new_line = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id2, extmark_id, {})[1]
+  buf_state.active_suggestion = suggestion
+  local new_line = vim.api.nvim_buf_get_extmark_by_id(buffer, C.hunk_ns_id, extmark_id, {})[1]
   local new_col = M.get_new_cursor_position(suggestion)[2]
   vim.fn.cursor(new_line + 1, new_col)
 end
 
----@param suggestion Suggestion
-function M.complete(suggestion)
-  suggestion = suggestion or M.get_suggestion_under_cursor()
+---@param buffer integer
+function M.complete(buffer)
+  buffer = buffer or 0
+  local buf_state = state.get_buf_state(buffer)
 
-  if not suggestion then
+  if not buf_state.active_suggestion then
+    buf_state.active_suggestion = M.get_suggestion_under_cursor()
+  end
+
+  if not buf_state.active_suggestion then
     M.jump_to_next_suggestion()
-    ui.clear_ui()
+    ui.clear_ui(buffer)
     log.info("No suggestion active")
     return
   end
 
-  log.debug("suggestions", M.suggestions)
-  log.debug("suggestion", suggestion)
-
-  local extmark_id = suggestion.extmark_id
-  local start_pos = vim.api.nvim_buf_get_extmark_by_id(0, _G.ns_id2, extmark_id, {})
+  local extmark_id = buf_state.active_suggestion.extmark_id
+  local start_pos = vim.api.nvim_buf_get_extmark_by_id(buffer, C.hunk_ns_id, extmark_id, {})
   log.debug("start_pos", vim.inspect(start_pos))
-  local text_lines = vim.api.nvim_buf_get_lines(0, start_pos[1], start_pos[1] + #suggestion.diff_lines, false)
+  local text_lines =
+    vim.api.nvim_buf_get_lines(buffer, start_pos[1], start_pos[1] + #buf_state.active_suggestion.diff_lines, false)
 
-  local diff_text = vim.text.diff(table.concat(text_lines, "\n"), suggestion.text)
+  local diff_text = vim.text.diff(table.concat(text_lines, "\n"), buf_state.active_suggestion.text)
   context.edit_history:push(diff_text)
 
   local edits = {
@@ -262,11 +267,11 @@ function M.complete(suggestion)
           character = start_pos[2],
         },
         ["end"] = {
-          line = start_pos[1] + #suggestion.diff_lines - 1,
+          line = start_pos[1] + #buf_state.active_suggestion.diff_lines - 1,
           character = math.huge,
         },
       },
-      newText = suggestion.text,
+      newText = #buf_state.active_suggestion.text,
     },
   }
 
@@ -275,10 +280,10 @@ function M.complete(suggestion)
 
   -- M.skip = true
   vim.lsp.util.apply_text_edits(edits, vim.api.nvim_win_get_buf(0), "utf-8")
-  local new_cursor_position = M.get_new_cursor_position(suggestion)
+  local new_cursor_position = M.get_new_cursor_position(buf_state.active_suggestion)
   vim.fn.cursor(new_cursor_position)
-  M.clear_suggestion(extmark_id)
-  ui.clear_ui()
+  M.clear_suggestion(buffer, extmark_id)
+  ui.clear_ui(buffer)
 end
 
 return M
